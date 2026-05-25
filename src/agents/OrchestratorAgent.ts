@@ -165,6 +165,11 @@ export class OrchestratorAgent implements ShoppingAgent {
 
   // ====== Intent Analysis Engine ======
 
+  // Question indicators — user is asking something specific, not just browsing
+  private hasQuestionIndicator(text: string): boolean {
+    return /[?？吗呢]|包邮|包有|包油|运费|邮费|材质|面料|成分|什么|怎么|如何|多少|价格|便宜|优惠|划算|适合|合适|尺码|大小|码|颜色|可以|能不能|有没有|有没有|有.*吗|有没有/.test(text)
+  }
+
   private analyzeIntent(userText: string): IntentResult {
     const text = userText.toLowerCase()
 
@@ -189,29 +194,80 @@ export class OrchestratorAgent implements ShoppingAgent {
       return { type: 'current_product', searchKeywords: [], targetCategory: null }
     }
 
-    // Product search patterns
+    // "有没有X" / "有X吗" — explicit product existence check
+    const existenceMatch = text.match(/有(?:没有)?(.{1,8})[吗呢？?]?$|有没有(.{1,8})/)
+    if (existenceMatch) {
+      const rawTerm = (existenceMatch[1] || existenceMatch[2] || '').trim()
+      const searchTerm = rawTerm.replace(/[吗呢？?]+$/g, '').trim()
+      if (searchTerm && /[一-鿿]/.test(searchTerm)) {
+        const found = this.searchProductByKeyword(searchTerm)
+        if (found) {
+          return { type: 'specific_product', searchKeywords: [searchTerm], targetCategory: null, matchedProduct: found }
+        }
+        // Product not found — let AdvisorAgent handle the "not found" response
+        return { type: 'product_search', searchKeywords: [searchTerm], targetCategory: null }
+      }
+    }
+
+    // Product search patterns — check if user is searching for a category
     const searchPatterns: [RegExp, string, string][] = [
       [/男装|男款|男士|男生/, 'clothing', '男装'],
       [/女装|女款|女士|女生|裙子|连衣裙|T恤|上衣|裤子|外套/, 'clothing', '女装'],
       [/面膜|精华|护肤|面霜|化妆水|爽肤水|卸妆|防晒/, 'skincare', '美妆护肤'],
       [/鞋子|运动鞋|跑鞋|休闲鞋/, 'clothing', '鞋类'],
-      [/包包|手提包|斜挎包|单肩包|双肩包|配饰/, 'accessories', '配饰包包'],
+      [/包包|手提包|斜挎包|单肩包|双肩包|配饰|手表/, 'accessories', '配饰包包'],
       [/耳机|数码|电子产品|手机|平板/, 'electronics', '数码产品'],
       [/吃的|零食|食品|枣|坚果/, 'food', '食品'],
       [/便宜的|平价|学生党|实惠/, '', '高性价比'],
       [/贵的|高端|大牌|奢侈/, '', '高端商品'],
     ]
 
+    // If the text contains a question indicator AND a category keyword,
+    // find the best matching product and route to product_query (specific_product)
+    const hasQuestion = this.hasQuestionIndicator(text)
+
     for (const [pattern, category, label] of searchPatterns) {
       const match = text.match(pattern)
       if (match) {
         const matchedWord = match[0]
         const keywords = matchedWord !== label ? [matchedWord, label] : [label]
+
+        if (hasQuestion && category) {
+          // User is asking a question about a category — find best product match
+          const bestProduct = this.findBestProductForCategory(category, keywords)
+          if (bestProduct) {
+            return { type: 'specific_product', searchKeywords: keywords, targetCategory: category, matchedProduct: bestProduct }
+          }
+        }
+
         return { type: 'product_search', searchKeywords: keywords, targetCategory: category || null }
       }
     }
 
+    // No product match but user is asking a question — route to general
     return { type: 'general', searchKeywords: [], targetCategory: null }
+  }
+
+  // Search product catalog by keyword
+  private searchProductByKeyword(keyword: string): Product | null {
+    const lower = keyword.toLowerCase()
+    for (const product of mockProducts) {
+      if (
+        product.name.toLowerCase().includes(lower) ||
+        product.category.toLowerCase().includes(lower) ||
+        product.tags.some((t) => t.toLowerCase().includes(lower))
+      ) {
+        return product
+      }
+    }
+    return null
+  }
+
+  // Find best product for a category
+  private findBestProductForCategory(category: string, _keywords: string[]): Product | null {
+    const matches = mockProducts.filter((p) => p.category === category)
+    if (matches.length === 0) return null
+    return matches.sort((a, b) => b.rating - a.rating)[0]
   }
 
   // Detect if user mentions a specific product by name

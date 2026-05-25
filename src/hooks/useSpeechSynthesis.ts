@@ -67,9 +67,13 @@ export function useSpeechSynthesis() {
   const queueRef = useRef<string[]>([])
   const speakingRef = useRef(false)
   const cancelRef = useRef(false)
+  const generationRef = useRef(0)
 
   const speakNext = useCallback(
-    (onEnd?: () => void) => {
+    (generation: number, onEnd?: () => void) => {
+      // Stale callback from a cancelled/overwritten speak call — bail out
+      if (generation !== generationRef.current) return
+
       if (cancelRef.current || queueRef.current.length === 0) {
         speakingRef.current = false
         if (cancelRef.current) {
@@ -84,8 +88,8 @@ export function useSpeechSynthesis() {
       const sentence = queueRef.current.shift()!
       const utterance = new SpeechSynthesisUtterance(sentence)
       utterance.lang = 'zh-CN'
-      utterance.rate = 0.95  // Slightly slower, more natural
-      utterance.pitch = 1.05  // Slightly higher, more friendly
+      utterance.rate = 0.95
+      utterance.pitch = 1.05
       utterance.volume = 0.9
 
       const bestVoice = selectBestVoice()
@@ -93,10 +97,11 @@ export function useSpeechSynthesis() {
         utterance.voice = bestVoice
       }
 
+      const capturedGeneration = generation
+
       utterance.onend = () => {
-        // Small pause between sentences for natural rhythm
         if (queueRef.current.length > 0) {
-          setTimeout(() => speakNext(onEnd), 150)
+          setTimeout(() => speakNext(capturedGeneration, onEnd), 150)
         } else {
           speakingRef.current = false
           onEnd?.()
@@ -105,9 +110,8 @@ export function useSpeechSynthesis() {
 
       utterance.onerror = (e) => {
         console.warn('TTS error:', e)
-        // Continue with next sentence despite error
         if (queueRef.current.length > 0) {
-          setTimeout(() => speakNext(onEnd), 100)
+          setTimeout(() => speakNext(capturedGeneration, onEnd), 100)
         } else {
           speakingRef.current = false
           onEnd?.()
@@ -121,23 +125,24 @@ export function useSpeechSynthesis() {
 
   const speak = useCallback(
     (text: string, onEnd?: () => void) => {
-      // Cancel any ongoing speech
+      // Cancel any ongoing speech and bump generation so stale
+      // speakNext callbacks (scheduled by cancelled utterances) bail out
       window.speechSynthesis.cancel()
       queueRef.current = []
       speakingRef.current = false
       cancelRef.current = false
+      generationRef.current += 1
 
       if (!text.trim()) {
         onEnd?.()
         return
       }
 
-      // Split into sentences for natural pauses
       const sentences = splitSentences(text)
       queueRef.current = [...sentences]
 
-      // Small initial delay for natural feel
-      setTimeout(() => speakNext(onEnd), 80)
+      const gen = generationRef.current
+      setTimeout(() => speakNext(gen, onEnd), 80)
     },
     [speakNext]
   )

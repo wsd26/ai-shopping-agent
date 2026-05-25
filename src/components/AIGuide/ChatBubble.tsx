@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { useLiveStreamStore } from '../../store/useLiveStreamStore'
 import { useConversationStore } from '../../store/useConversationStore'
+import { mockProducts } from '../../constants/products'
 import type { Message, Product } from '../../types'
 import { ProductRecommendationCard } from './ProductRecommendationCard'
 import { LoadingDots } from '../Common/LoadingDots'
@@ -13,7 +13,6 @@ interface ChatBubbleProps {
 
 export function ChatBubble({ message, isLoading, onProductClick }: ChatBubbleProps) {
   const isAI = message.role === 'assistant'
-  const currentProduct = useLiveStreamStore((s) => s.currentProduct)
   const setFeedback = useConversationStore((s) => s.setMessageFeedback)
   const [showThanks, setShowThanks] = useState(false)
 
@@ -31,8 +30,11 @@ export function ChatBubble({ message, isLoading, onProductClick }: ChatBubblePro
   }
 
   const handleCardClick = () => {
-    if (message.productCard && onProductClick && currentProduct) {
-      onProductClick(currentProduct)
+    if (message.productCard && onProductClick) {
+      const targetProduct = mockProducts.find((p) => p.id === message.productCard!.productId)
+      if (targetProduct) {
+        onProductClick(targetProduct)
+      }
     }
   }
 

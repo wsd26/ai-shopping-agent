@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { useUserStore } from '../store/useUserStore'
 import { useNavigate } from 'react-router-dom'
@@ -56,6 +56,13 @@ export default function LandingPage() {
   const { setPreferences, setOnboardingComplete, hasCompletedOnboarding } = useUserStore()
   const navigate = useNavigate()
 
+  // Use useEffect for redirect instead of calling navigate() during render
+  useEffect(() => {
+    if (hasCompletedOnboarding) {
+      navigate('/live', { replace: true })
+    }
+  }, [hasCompletedOnboarding, navigate])
+
   const question = QUESTIONS[step]
   const isMulti = question?.key === 'concerns' || question?.key === 'categories'
 
@@ -73,7 +80,6 @@ export default function LandingPage() {
       if (step < QUESTIONS.length - 1) {
         setStep(step + 1)
       } else {
-        // Submit
         const prefs: Record<string, unknown> = {}
         if (newAnswers.skinTone) prefs.skinTone = newAnswers.skinTone
         if (newAnswers.budget) prefs.budgetRange = newAnswers.budget
@@ -109,11 +115,6 @@ export default function LandingPage() {
   const skipAll = () => {
     setOnboardingComplete()
     navigate('/live')
-  }
-
-  if (hasCompletedOnboarding) {
-    navigate('/live', { replace: true })
-    return null
   }
 
   return (

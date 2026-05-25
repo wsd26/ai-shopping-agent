@@ -14,7 +14,7 @@ export function VoiceInputButton() {
   const setRecording = useConversationStore((s) => s.setRecording)
   const setSpeaking = useConversationStore((s) => s.setSpeaking)
   const setError = useConversationStore((s) => s.setError)
-  const { handleUserVoice, handleUserText } = useAIShoppingGuide()
+  const { handleUserVoice, handleUserText, stopSpeaking } = useAIShoppingGuide()
   const { toast, showToast, hideToast } = useToast()
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [textInput, setTextInput] = useState('')
@@ -44,7 +44,7 @@ export function VoiceInputButton() {
   const handlePressStart = useCallback(() => {
     // When AI is speaking, pressing interrupts and starts listening
     if (isSpeaking) {
-      window.speechSynthesis.cancel()
+      stopSpeaking()
       setSpeaking(false)
     }
     if (isThinking) return
@@ -55,7 +55,7 @@ export function VoiceInputButton() {
       setRecording(false)
       showToast('说话时间太长啦，请简短一点')
     }, 10000)
-  }, [isThinking, isSpeaking, setSpeaking, setRecording, start, stop, showToast])
+  }, [isThinking, isSpeaking, setSpeaking, setRecording, start, stop, showToast, stopSpeaking])
 
   const handlePressEnd = useCallback(() => {
     if (timeoutRef.current) {

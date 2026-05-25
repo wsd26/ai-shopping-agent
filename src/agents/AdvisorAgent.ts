@@ -95,8 +95,8 @@ export class AdvisorAgent implements ShoppingAgent {
       }
     }
 
-    // Shipping
-    if (/包邮|运费|邮费/.test(text)) {
+    // Shipping (includes common speech recognition mishearings of 包邮 like 包有/包油)
+    if (/包邮|包有|包油|运费|邮费|包.*吗|包不包/.test(text)) {
       return {
         text: `亲，"${targetProduct.name}"直播间下单享受包邮服务哦～放心购买！`,
         intent: 'answer_question',
@@ -153,7 +153,7 @@ export class AdvisorAgent implements ShoppingAgent {
       text: `关于"${targetProduct.name}"——${targetProduct.description.slice(0, 60)}。您想了解材质、价格，还是看看适不适合您？`,
       intent: 'clarify',
       productCard: this.makeProductCard(targetProduct, intent.type === 'specific_product' ? '您提到的商品' : '直播间当前主打商品'),
-      quickReplies: ['材质是什么？', '适合我吗？', '有优惠吗？'],
+      quickReplies: ['材质是什么？', '包邮吗？', '适合我吗？'],
     }
   }
 

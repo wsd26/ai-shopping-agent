@@ -218,6 +218,7 @@ export function useAIShoppingGuide() {
     handleUserVoice,
     handleUserText,
     runAgentObservation,
+    stopSpeaking: stop,
     isProcessing: processingRef.current,
   }
 }
