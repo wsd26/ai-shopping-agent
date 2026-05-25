@@ -5,29 +5,10 @@
     <link rel="icon" type="image/svg+xml" href="/ai-shopping-agent/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <title>快手直播 - AI购物助手</title>
-    <script type="module"  src="/ai-shopping-agent/assets/index-BNADqY0v.js"></script>
-    <link rel="stylesheet"  href="/ai-shopping-agent/assets/index-BMfZ5B4W.css">
+    <script type="module" crossorigin src="/ai-shopping-agent/assets/index-Cuhaq2CJ.js"></script>
+    <link rel="stylesheet" crossorigin href="/ai-shopping-agent/assets/index-BMfZ5B4W.css">
   </head>
   <body>
     <div id="root"></div>
-    <div id="diag" style="position:fixed;top:0;left:0;z-index:99999;background:red;color:white;padding:4px 12px;font-size:14px;font-family:sans-serif;">DIAG: HTML loaded</div>
-    <script>
-      window.onerror = function(m) {
-        var el = document.getElementById('diag');
-        if (el) el.textContent = 'JS ERROR: ' + m;
-        return false;
-      };
-      setTimeout(function() {
-        var root = document.getElementById('root');
-        var diag = document.getElementById('diag');
-        if (root && root.children.length === 0) {
-          diag.textContent = 'DIAG: React NOT mounted (root empty after 5s)';
-          diag.style.background = 'orange';
-        } else if (root && root.children.length > 0) {
-          diag.textContent = 'DIAG: React mounted OK (' + root.children.length + ' children)';
-          diag.style.background = 'green';
-        }
-      }, 5000);
-    </script>
   </body>
 </html>
