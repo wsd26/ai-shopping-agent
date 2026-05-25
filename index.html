@@ -10,5 +10,24 @@
   </head>
   <body>
     <div id="root"></div>
+    <div id="diag" style="position:fixed;top:0;left:0;z-index:99999;background:red;color:white;padding:4px 12px;font-size:14px;font-family:sans-serif;">DIAG: HTML loaded</div>
+    <script>
+      window.onerror = function(m) {
+        var el = document.getElementById('diag');
+        if (el) el.textContent = 'JS ERROR: ' + m;
+        return false;
+      };
+      setTimeout(function() {
+        var root = document.getElementById('root');
+        var diag = document.getElementById('diag');
+        if (root && root.children.length === 0) {
+          diag.textContent = 'DIAG: React NOT mounted (root empty after 5s)';
+          diag.style.background = 'orange';
+        } else if (root && root.children.length > 0) {
+          diag.textContent = 'DIAG: React mounted OK (' + root.children.length + ' children)';
+          diag.style.background = 'green';
+        }
+      }, 5000);
+    </script>
   </body>
 </html>
