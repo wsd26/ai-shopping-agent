@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400">
+  <defs><linearGradient id="g2" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" style="stop-color:#BAE1FF"/><stop offset="100%" style="stop-color:#6BB5FF"/></linearGradient></defs>
+  <rect width="400" height="400" rx="24" fill="url(#g2)"/>
+  <text x="200" y="200" text-anchor="middle" dominant-baseline="central" font-size="120">🧴</text>
+  <text x="200" y="310" text-anchor="middle" font-size="28" fill="white" font-weight="bold">补水面膜</text>
+  <text x="200" y="350" text-anchor="middle" font-size="22" fill="rgba(255,255,255,0.8)">¥49.9</text>
+</svg>
