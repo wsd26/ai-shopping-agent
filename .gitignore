@@ -24,3 +24,6 @@ dist-ssr
 *.sw?
 
 .vercel
+作品集/
+__pycache__/
+diag-check.json

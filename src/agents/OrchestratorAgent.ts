@@ -170,6 +170,21 @@ export class OrchestratorAgent implements ShoppingAgent {
     return /[?？吗呢]|包邮|包有|包油|运费|邮费|材质|面料|成分|什么|怎么|如何|多少|价格|便宜|优惠|划算|适合|合适|尺码|大小|码|颜色|可以|能不能|有没有|有没有|有.*吗|有没有/.test(text)
   }
 
+  // Product search patterns — defined early so existence check can use as fallback
+  private getSearchPatterns(): [RegExp, string, string][] {
+    return [
+      [/男装|男款|男士|男生/, 'clothing', '男装'],
+      [/女装|女款|女士|女生|裙子|连衣裙|T恤|上衣|裤子|外套/, 'clothing', '女装'],
+      [/面膜|精华|护肤|面霜|化妆水|爽肤水|卸妆|防晒/, 'skincare', '美妆护肤'],
+      [/鞋子|运动鞋|跑鞋|休闲鞋/, 'clothing', '鞋类'],
+      [/包包|手提包|斜挎包|单肩包|双肩包|配饰|手表/, 'accessories', '配饰包包'],
+      [/耳机|数码|电子产品|手机|平板/, 'electronics', '数码产品'],
+      [/吃的|零食|食品|枣|坚果/, 'food', '食品'],
+      [/便宜的|平价|学生党|实惠/, '', '高性价比'],
+      [/贵的|高端|大牌|奢侈/, '', '高端商品'],
+    ]
+  }
+
   private analyzeIntent(userText: string): IntentResult {
     const text = userText.toLowerCase()
 
@@ -204,23 +219,22 @@ export class OrchestratorAgent implements ShoppingAgent {
         if (found) {
           return { type: 'specific_product', searchKeywords: [searchTerm], targetCategory: null, matchedProduct: found }
         }
-        // Product not found — let AdvisorAgent handle the "not found" response
+        // Exact match failed — check if searchTerm matches a category pattern
+        for (const [pattern, category, label] of this.getSearchPatterns()) {
+          if (pattern.test(searchTerm) && category) {
+            const bestProduct = this.findBestProductForCategory(category, [searchTerm, label])
+            if (bestProduct) {
+              return { type: 'specific_product', searchKeywords: [searchTerm, label], targetCategory: category, matchedProduct: bestProduct }
+            }
+            return { type: 'product_search', searchKeywords: [searchTerm, label], targetCategory: category }
+          }
+        }
+        // Truly not found — let AdvisorAgent handle the "not found" response
         return { type: 'product_search', searchKeywords: [searchTerm], targetCategory: null }
       }
     }
 
-    // Product search patterns — check if user is searching for a category
-    const searchPatterns: [RegExp, string, string][] = [
-      [/男装|男款|男士|男生/, 'clothing', '男装'],
-      [/女装|女款|女士|女生|裙子|连衣裙|T恤|上衣|裤子|外套/, 'clothing', '女装'],
-      [/面膜|精华|护肤|面霜|化妆水|爽肤水|卸妆|防晒/, 'skincare', '美妆护肤'],
-      [/鞋子|运动鞋|跑鞋|休闲鞋/, 'clothing', '鞋类'],
-      [/包包|手提包|斜挎包|单肩包|双肩包|配饰|手表/, 'accessories', '配饰包包'],
-      [/耳机|数码|电子产品|手机|平板/, 'electronics', '数码产品'],
-      [/吃的|零食|食品|枣|坚果/, 'food', '食品'],
-      [/便宜的|平价|学生党|实惠/, '', '高性价比'],
-      [/贵的|高端|大牌|奢侈/, '', '高端商品'],
-    ]
+    const searchPatterns = this.getSearchPatterns()
 
     // If the text contains a question indicator AND a category keyword,
     // find the best matching product and route to product_query (specific_product)

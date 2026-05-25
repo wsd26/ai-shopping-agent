@@ -148,6 +148,16 @@ export class AdvisorAgent implements ShoppingAgent {
       }
     }
 
+    // Availability check: "有X吗" / "有没有X"
+    if (/有.*吗|有没有/.test(text)) {
+      return {
+        text: `有的亲！"${targetProduct.name}"在直播间就有哦，现在下单¥${targetProduct.price}～${targetProduct.description.slice(0, 30)}。`,
+        intent: 'recommend_product',
+        productCard: this.makeProductCard(targetProduct, '直播间在售'),
+        quickReplies: ['加入购物车', '包邮吗？', '适合我吗？'],
+      }
+    }
+
     // General info
     return {
       text: `关于"${targetProduct.name}"——${targetProduct.description.slice(0, 60)}。您想了解材质、价格，还是看看适不适合您？`,
