@@ -25,5 +25,6 @@ dist-ssr
 
 .vercel
 作品集/
+作品集.zip
 __pycache__/
 diag-check.json

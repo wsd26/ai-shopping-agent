@@ -1,9 +1,8 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useConversationStore, type AgentMode } from '../../store/useConversationStore'
 import { useUserStore } from '../../store/useUserStore'
-import { agentBus } from '../../agents/AgentBus'
-import type { AgentType, AgentState } from '../../agents/types'
+import { monitorAgent } from '../../agents/MonitorAgent'
 
 const AGENT_MODE_CONFIG: Record<AgentMode, { label: string; color: string; icon: string; pulse: boolean }> = {
   idle: { label: '待命中', color: 'bg-gray-500', icon: '⏸️', pulse: false },
@@ -13,35 +12,13 @@ const AGENT_MODE_CONFIG: Record<AgentMode, { label: string; color: string; icon:
   executing: { label: '正在执行任务...', color: 'bg-purple-500', icon: '⚡', pulse: true },
 }
 
-const AGENT_META: Record<Exclude<AgentType, 'ui'>, { icon: string; label: string; color: string }> = {
-  orchestrator: { icon: '🎯', label: '调度', color: 'bg-amber-500' },
-  monitor: { icon: '👀', label: '监控', color: 'bg-blue-500' },
-  advisor: { icon: '💡', label: '导购', color: 'bg-green-500' },
-  executor: { icon: '⚡', label: '执行', color: 'bg-purple-500' },
-}
-
 export function AgentStatusBar() {
   const agentMode = useConversationStore((s) => s.agentMode)
   const agentTask = useConversationStore((s) => s.agentTask)
   const autoObserve = useConversationStore((s) => s.autoObserve)
   const setAutoObserve = useConversationStore((s) => s.setAutoObserve)
-  const agentObservationCount = useConversationStore((s) => s.agentObservationCount)
   const preferences = useUserStore((s) => s.preferences)
   const [showProfile, setShowProfile] = useState(false)
-  const [agentStates, setAgentStates] = useState<Partial<Record<AgentType, AgentState>>>({})
-
-  // Poll agent states
-  useEffect(() => {
-    const interval = setInterval(() => {
-      const states: Partial<Record<AgentType, AgentState>> = {}
-      for (const type of ['orchestrator', 'monitor', 'advisor', 'executor'] as const) {
-        const agent = agentBus.getAgent(type)
-        if (agent) states[type] = agent.getState()
-      }
-      setAgentStates(states)
-    }, 1000)
-    return () => clearInterval(interval)
-  }, [])
 
   const config = AGENT_MODE_CONFIG[agentMode]
 
@@ -52,9 +29,8 @@ export function AgentStatusBar() {
     profileTags.push(...preferences.preferredCategories.map((c) => `喜欢${c}`))
   }
 
-  const activeAgents = Object.entries(agentStates).filter(
-    ([, state]) => state === 'busy'
-  ).length
+  const monitorEnabled = monitorAgent.isEnabled()
+  const observationCount = monitorAgent.getObservationCount()
 
   return (
     <AnimatePresence>
@@ -78,35 +54,31 @@ export function AgentStatusBar() {
             </div>
           </div>
 
-          {/* Multi-agent status dots */}
+          {/* Agent status dots: Shopping (orange) + Monitor (blue) */}
           <div className="flex items-center gap-1 shrink-0">
-            {(Object.keys(AGENT_META) as Array<Exclude<AgentType, 'ui'>>).map((type) => {
-              const meta = AGENT_META[type]
-              const state = agentStates[type] || 'idle'
-              return (
-                <span
-                  key={type}
-                  title={`${meta.label}Agent: ${state}`}
-                  className={`w-1.5 h-1.5 rounded-full transition-colors ${
-                    state === 'busy' ? meta.color + ' animate-pulse' : 'bg-white/10'
-                  }`}
-                />
-              )
-            })}
+            <span
+              title="ShoppingAgent (对话)"
+              className={`w-1.5 h-1.5 rounded-full transition-colors ${
+                agentMode !== 'idle' ? 'bg-orange-500 animate-pulse' : 'bg-white/10'
+              }`}
+            />
+            <span
+              title={`MonitorAgent (${monitorEnabled ? '监控中' : '已关闭'})`}
+              className={`w-1.5 h-1.5 rounded-full transition-colors ${
+                monitorEnabled ? 'bg-blue-500' : 'bg-white/10'
+              }`}
+            />
           </div>
 
           {/* Agent stats */}
           <div className="flex items-center gap-3 text-white/30 text-[10px] shrink-0">
-            {activeAgents > 0 && (
-              <span className="text-orange-300/60">{activeAgents}个Agent活跃</span>
-            )}
             {agentTask && (
               <span className="text-purple-300/60 truncate max-w-[120px]">
-                📋 {agentTask}
+                {agentTask}
               </span>
             )}
-            {agentObservationCount > 0 && (
-              <span>已推荐 {agentObservationCount} 次</span>
+            {observationCount > 0 && (
+              <span>已观察 {observationCount} 件</span>
             )}
           </div>
 

@@ -4,7 +4,6 @@ import { mockProducts } from '../constants/products'
 import type { UserPreferences, Product } from '../types'
 import type { ProductCategory } from '../types/product'
 
-// Helper: create a neutral product with no bonus-triggering properties
 function neutralProduct(overrides: Partial<Product> = {}): Product {
   const base: Product = {
     ...mockProducts[0],
@@ -21,7 +20,7 @@ function neutralProduct(overrides: Partial<Product> = {}): Product {
   return merged
 }
 
-describe('MonitorAgent Scoring Evaluation', () => {
+describe('MonitorAgent Scoring Evaluation (V2)', () => {
   // ─── Scoring engine correctness ───
   describe('scoreProduct — base scoring', () => {
     it('base score is 50 with neutral product and no preferences', () => {
@@ -34,21 +33,20 @@ describe('MonitorAgent Scoring Evaluation', () => {
       const product = neutralProduct({ price: 100 })
       const prefs: UserPreferences = { budgetRange: [50, 150] }
       const score = monitorAgent.scoreProduct(product, prefs)
-      expect(score.matchScore).toBe(65) // 50 + 15
+      expect(score.matchScore).toBe(65)
     })
 
     it('under budget adds 5 points', () => {
       const product = neutralProduct({ price: 30 })
       const prefs: UserPreferences = { budgetRange: [50, 150] }
       const score = monitorAgent.scoreProduct(product, prefs)
-      expect(score.matchScore).toBe(55) // 50 + 5
+      expect(score.matchScore).toBe(55)
     })
 
     it('slightly over budget (≤30%) adds 5 points', () => {
       const product = neutralProduct({ price: 180 })
       const prefs: UserPreferences = { budgetRange: [50, 150] }
       const score = monitorAgent.scoreProduct(product, prefs)
-      // 180 vs max 150 → 30 over → 20% → ≤30% → +5
       expect(score.matchScore).toBe(55)
     })
 
@@ -56,83 +54,45 @@ describe('MonitorAgent Scoring Evaluation', () => {
       const product = neutralProduct({ category: 'clothing' })
       const prefs: UserPreferences = { preferredCategories: ['服装'] }
       const score = monitorAgent.scoreProduct(product, prefs)
-      expect(score.matchScore).toBe(70) // 50 + 20
+      expect(score.matchScore).toBe(70)
     })
 
     it('skin tone match adds 10 points for clothing', () => {
       const product = neutralProduct({ category: 'clothing' })
       const prefs: UserPreferences = { skinTone: '黄黑皮' }
       const score = monitorAgent.scoreProduct(product, prefs)
-      expect(score.matchScore).toBe(60) // 50 + 10
+      expect(score.matchScore).toBe(60)
     })
 
     it('skin tone match adds 10 points for skincare', () => {
       const product = neutralProduct({ category: 'skincare' })
       const prefs: UserPreferences = { skinTone: '白皙' }
       const score = monitorAgent.scoreProduct(product, prefs)
-      expect(score.matchScore).toBe(60) // 50 + 10
+      expect(score.matchScore).toBe(60)
     })
 
     it('high rating (≥4.7) adds 8 points', () => {
       const product = neutralProduct({ rating: 4.8 })
       const score = monitorAgent.scoreProduct(product, {})
-      expect(score.matchScore).toBe(58) // 50 + 8
+      expect(score.matchScore).toBe(58)
     })
 
     it('high sales (>5000) adds 7 points', () => {
       const product = neutralProduct({ salesCount: 10000 })
       const score = monitorAgent.scoreProduct(product, {})
-      expect(score.matchScore).toBe(57) // 50 + 7
+      expect(score.matchScore).toBe(57)
     })
 
     it('big discount (≥50% off) adds 10 points', () => {
       const product = neutralProduct({ price: 50, originalPrice: 200 })
       const score = monitorAgent.scoreProduct(product, {})
-      expect(score.matchScore).toBe(60) // 50 + 10
+      expect(score.matchScore).toBe(60)
     })
   })
 
   // ─── Composite scoring ───
   describe('scoreProduct — composite scoring', () => {
     it('stacks multiple bonuses correctly', () => {
-      const product = neutralProduct({
-        price: 100,
-        category: 'clothing',
-        rating: 4.8,
-        salesCount: 10000,
-        originalPrice: 400, // 75% discount
-      })
-      const prefs: UserPreferences = {
-        budgetRange: [50, 150],
-        preferredCategories: ['服装'],
-        skinTone: '黄黑皮',
-      }
-      // 50 + 15(budget) + 20(category) + 10(skinTone) + 8(rating) + 7(sales) + 10(discount) = 120
-      const score = monitorAgent.scoreProduct(product, prefs)
-      expect(score.matchScore).toBe(120)
-    })
-  })
-
-  // ─── Threshold: shouldNotify when score ≥ 65 ───
-  describe('notification threshold (≥65)', () => {
-    it('notifies when score is exactly 65', () => {
-      const product = neutralProduct({ price: 100 })
-      const prefs: UserPreferences = { budgetRange: [50, 150] }
-      // 50 + 15 = 65
-      const score = monitorAgent.scoreProduct(product, prefs)
-      expect(score.shouldNotify).toBe(true)
-    })
-
-    it('does not notify when score is 64', () => {
-      const product = neutralProduct({ price: 30 })
-      const prefs: UserPreferences = { budgetRange: [50, 150], skinTone: '黄黑皮' }
-      // 50 + 5(under budget) + 0(skinTone on food) = 55
-      const score = monitorAgent.scoreProduct(product, prefs)
-      expect(score.shouldNotify).toBe(false)
-      expect(score.matchScore).toBeLessThan(65)
-    })
-
-    it('perfect match product (budget+category+skinTone on clothing)', () => {
       const product = neutralProduct({
         price: 100,
         category: 'clothing',
@@ -145,51 +105,34 @@ describe('MonitorAgent Scoring Evaluation', () => {
         preferredCategories: ['服装'],
         skinTone: '黄黑皮',
       }
+      // 50 + 15 + 20 + 10 + 8 + 7 + 10 = 120
       const score = monitorAgent.scoreProduct(product, prefs)
-      expect(score.shouldNotify).toBe(true)
-      expect(score.matchScore).toBeGreaterThan(100)
+      expect(score.matchScore).toBe(120)
     })
   })
 
-  // ─── Recommendation content ───
-  describe('recommendation content', () => {
-    it('includes product name in recommendation text', () => {
-      const product = neutralProduct({ price: 100, category: 'clothing' })
-      const prefs: UserPreferences = { budgetRange: [0, 999], preferredCategories: ['服装'] }
-      const score = monitorAgent.scoreProduct(product, prefs)
-      expect(score.shouldNotify).toBe(true)
-      expect(score.recommendation).toBeDefined()
-      expect(score.recommendation!.text).toContain(product.name)
-      expect(score.recommendation!.intent).toBe('recommend_product')
-      expect(score.recommendation!.productCard).toBeDefined()
-      expect(score.recommendation!.quickReplies).toHaveLength(3)
-    })
-  })
-
-  // ─── observeProduct integration ───
-  describe('observeProduct', () => {
-    it('skips duplicate product ids', () => {
+  // ─── observeProduct push threshold (≥65) ───
+  describe('observeProduct push threshold (≥65)', () => {
+    it('pushes when score is 65+ and user idle (budget match → 65)', () => {
       monitorAgent.reset()
-      const product = neutralProduct({ category: 'clothing' })
-      const prefs: UserPreferences = { preferredCategories: ['服装'] }
-
-      monitorAgent.observeProduct(product, prefs, 1) // first observation
-      const r2 = monitorAgent.observeProduct(product, prefs, 1)
-
-      expect(r2.shouldNotify).toBe(false)
-      expect(r2.reasoning).toBe('duplicate')
+      const product = neutralProduct({ price: 100 })
+      const prefs: UserPreferences = { budgetRange: [50, 150] }
+      const r = monitorAgent.observeProduct(product, prefs, 1)
+      expect(r.matchScore).toBe(65)
+      // shouldPush depends on activityClock — with no recent activity it should push
+      expect(r.shouldPush).toBe(true)
     })
 
-    it('skips initial product (index 0)', () => {
+    it('does not push when score < 65', () => {
       monitorAgent.reset()
-      const product = neutralProduct()
-      const prefs: UserPreferences = { preferredCategories: ['服装'] }
-      const r = monitorAgent.observeProduct(product, prefs, 0)
-      expect(r.shouldNotify).toBe(false)
-      expect(r.reasoning).toBe('initial product')
+      const product = neutralProduct({ price: 30 })
+      const prefs: UserPreferences = { budgetRange: [50, 150], skinTone: '黄黑皮' }
+      const r = monitorAgent.observeProduct(product, prefs, 1)
+      expect(r.matchScore).toBeLessThan(65)
+      expect(r.shouldPush).toBe(false)
     })
 
-    it('notifies for high-match product at index > 0', () => {
+    it('perfect match product (budget+category+skinTone on clothing)', () => {
       monitorAgent.reset()
       const product = neutralProduct({
         price: 100,
@@ -204,14 +147,90 @@ describe('MonitorAgent Scoring Evaluation', () => {
         skinTone: '黄黑皮',
       }
       const r = monitorAgent.observeProduct(product, prefs, 1)
+      expect(r.shouldPush).toBe(true)
+      expect(r.matchScore).toBeGreaterThan(100)
+      expect(r.recommendation).toBeDefined()
+    })
+  })
+
+  // ─── Recommendation content (from observeProduct) ───
+  describe('recommendation content', () => {
+    it('includes product name in recommendation text', () => {
+      monitorAgent.reset()
+      const product = neutralProduct({ price: 100, category: 'clothing' })
+      const prefs: UserPreferences = { budgetRange: [0, 999], preferredCategories: ['服装'] }
+      const r = monitorAgent.observeProduct(product, prefs, 1)
+      expect(r.shouldPush).toBe(true)
+      expect(r.recommendation).toBeDefined()
+      expect(r.recommendation!.text).toContain(product.name)
+      expect(r.recommendation!.productCard).toBeDefined()
+      expect(r.recommendation!.quickReplies).toHaveLength(3)
+    })
+  })
+
+  // ─── observeProduct integration ───
+  describe('observeProduct', () => {
+    it('skips duplicate product ids', () => {
+      monitorAgent.reset()
+      const product = neutralProduct({ category: 'clothing' })
+      const prefs: UserPreferences = { preferredCategories: ['服装'] }
+      monitorAgent.observeProduct(product, prefs, 1)
+      const r2 = monitorAgent.observeProduct(product, prefs, 1)
+      expect(r2.shouldPush).toBe(false)
+      expect(r2.reasoning).toBe('duplicate')
+    })
+
+    it('skips duplicate product ids', () => {
+      monitorAgent.reset()
+      const product = neutralProduct({ category: 'clothing' })
+      const prefs: UserPreferences = { preferredCategories: ['服装'] }
+      monitorAgent.observeProduct(product, prefs, 1) // first observation
+      const r2 = monitorAgent.observeProduct(product, prefs, 1) // same product → duplicate
+      expect(r2.shouldPush).toBe(false)
+      expect(r2.reasoning).toBe('duplicate')
+    })
+
+    it('skips already-pushed products (different product, same ID)', () => {
+      monitorAgent.reset()
+      const product = neutralProduct({
+        price: 100, category: 'clothing', rating: 4.8, salesCount: 10000, originalPrice: 400,
+      })
+      const prefs: UserPreferences = {
+        budgetRange: [50, 150], preferredCategories: ['服装'], skinTone: '黄黑皮',
+      }
+      // First: push product (index > 0, high score, user idle)
+      monitorAgent.observeProduct({ ...product }, prefs, 1)
+      // Second: same product should be blocked by duplicate check
+      const r2 = monitorAgent.observeProduct({ ...product }, prefs, 1)
+      expect(r2.reasoning).toBe('duplicate')
+    })
+
+    it('skips initial product (index 0)', () => {
+      monitorAgent.reset()
+      const product = neutralProduct()
+      const prefs: UserPreferences = { preferredCategories: ['服装'] }
+      const r = monitorAgent.observeProduct(product, prefs, 0)
+      expect(r.shouldPush).toBe(false)
+      expect(r.reasoning).toBe('initial_product')
+    })
+
+    it('notifies for high-match product at index > 0', () => {
+      monitorAgent.reset()
+      const product = neutralProduct({
+        price: 100, category: 'clothing', rating: 4.8, salesCount: 10000, originalPrice: 400,
+      })
+      const prefs: UserPreferences = {
+        budgetRange: [50, 150], preferredCategories: ['服装'], skinTone: '黄黑皮',
+      }
+      const r = monitorAgent.observeProduct(product, prefs, 1)
       expect(r.matchScore).toBeGreaterThanOrEqual(65)
-      expect(r.shouldNotify).toBe(true)
+      expect(r.shouldPush).toBe(true)
     })
   })
 
   // ─── Comprehensive scoring report ───
   it('scoring evaluation report', () => {
-    console.log('\n========== 监控评分评测报告 ==========')
+    console.log('\n========== 监控评分评测报告 (V2) ==========')
 
     const testCases = [
       {
@@ -243,11 +262,10 @@ describe('MonitorAgent Scoring Evaluation', () => {
 
     for (const tc of testCases) {
       const result = monitorAgent.scoreProduct(tc.product, tc.prefs)
-      const notify = result.shouldNotify ? '🔔 推送' : '🔇 不推送'
+      const notify = result.matchScore >= 65 ? '(>=65可推送)' : '(<65不推送)'
       console.log(`  [${notify}] 评分:${result.matchScore} — ${tc.desc}`)
       console.log(`         理由: ${result.reasoning || '(无)'}`)
     }
-
     console.log('======================================\n')
   })
 })

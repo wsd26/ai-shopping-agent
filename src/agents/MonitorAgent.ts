@@ -1,111 +1,95 @@
-import type {
-  ShoppingAgent,
-  AgentInfo,
-  AgentMessage,
-  AgentState,
-} from './types'
-import type { Product, UserPreferences, ChatResponse } from '../types'
-import { agentBus } from './AgentBus'
+import type { Product, UserPreferences, ProductCardData } from '../types'
+import { activityClock } from './activityClock'
 
-// ====== Monitor Agent ======
-// Autonomous observer. Responsibilities:
-// 1. Continuously watch product changes in the live stream
-// 2. Score each product against user preferences (0-100)
-// 3. Proactively push recommendations when score ≥ 65 threshold
-// 4. Respect cooldown periods after user interaction
+// Autonomous observer — watches product changes and scores against user preferences.
+// Runs independently of ShoppingAgent. Triggered by product switch events, not user input.
+// Uses activityClock (not AgentBus) for conflict detection.
 
-export class MonitorAgent implements ShoppingAgent {
-  readonly info: AgentInfo = {
-    id: 'mon-001',
-    type: 'monitor',
-    name: '监控Agent',
-    icon: '👀',
-    state: 'idle',
-    description: '持续观察直播间，自动发现匹配好物',
+export interface ObserveResult {
+  shouldPush: boolean
+  matchScore: number
+  reasoning: string
+  recommendation?: {
+    text: string
+    productCard: ProductCardData
+    quickReplies: string[]
   }
+}
 
-  private state: AgentState = 'idle'
+export class MonitorAgent {
   private observationCount = 0
   private lastObservedProductId: string | null = null
+  private pushedProductIds = new Set<string>()
   private enabled = true
 
-  async handleMessage(msg: AgentMessage): Promise<Omit<AgentMessage, 'id' | 'timestamp'> | null> {
-    if (!this.enabled) return null
-
-    switch (msg.type) {
-      case 'status_update':
-        // External toggle: enable/disable monitoring
-        if (msg.payload.reasoning === 'enable') {
-          this.enabled = true
-        } else if (msg.payload.reasoning === 'disable') {
-          this.enabled = false
-        }
-        return null
-
-      default:
-        return null
-    }
-  }
-
-  // Main observation method - called from outside when product changes
   observeProduct(
     product: Product,
     preferences: UserPreferences,
     productIndex: number
-  ): { shouldNotify: boolean; matchScore: number; reasoning: string } {
-    this.state = 'busy'
+  ): ObserveResult {
+    if (!this.enabled) {
+      return { shouldPush: false, matchScore: 0, reasoning: 'disabled' }
+    }
 
-    // Skip duplicate observations
+    // Skip duplicates
     if (product.id === this.lastObservedProductId) {
-      this.state = 'idle'
-      return { shouldNotify: false, matchScore: 0, reasoning: 'duplicate' }
+      return { shouldPush: false, matchScore: 0, reasoning: 'duplicate' }
     }
     this.lastObservedProductId = product.id
 
-    // Skip initial product (index 0) - don't analyze on page load
-    if (productIndex === 0) {
-      this.state = 'idle'
-      return { shouldNotify: false, matchScore: 0, reasoning: 'initial product' }
+    // Don't push already-pushed products
+    if (this.pushedProductIds.has(product.id)) {
+      return { shouldPush: false, matchScore: 0, reasoning: 'already_pushed' }
     }
 
-    const analysis = this.scoreProduct(product, preferences)
+    // Skip initial product (index 0)
+    if (productIndex === 0) {
+      return { shouldPush: false, matchScore: 0, reasoning: 'initial_product' }
+    }
+
+    const { matchScore, reasoning } = this.scoreProduct(product, preferences)
     this.observationCount++
 
-    if (analysis.shouldNotify && analysis.recommendation) {
-      // Push alert to bus → Orchestrator decides timing
-      agentBus.dispatch({
-        from: 'monitor',
-        to: 'orchestrator',
-        type: 'monitor_alert',
-        payload: {
-          product,
-          response: analysis.recommendation,
-          matchScore: analysis.matchScore,
-          shouldNotify: true,
-          reasoning: analysis.reasoning,
-        },
-        priority: 'high',
-      })
+    const shouldPush = matchScore >= 65 && !activityClock.isUserActive()
 
-      this.state = 'idle'
-      return { shouldNotify: true, matchScore: analysis.matchScore, reasoning: analysis.reasoning }
+    if (!shouldPush) {
+      const blockReason = matchScore < 65
+        ? reasoning || `分数不足(${matchScore}<65)`
+        : 'user_active'
+      return { shouldPush: false, matchScore, reasoning: blockReason }
     }
 
-    this.state = 'idle'
-    return { shouldNotify: false, matchScore: analysis.matchScore, reasoning: analysis.reasoning }
+    this.pushedProductIds.add(product.id)
+
+    return {
+      shouldPush: true,
+      matchScore,
+      reasoning,
+      recommendation: {
+        text: `亲！刚上了一个很适合您的商品——"${product.name}"，${reasoning}。`,
+        productCard: {
+          productId: product.id,
+          name: product.name,
+          price: product.price,
+          imageUrl: product.imageUrl,
+          highlightReason: reasoning,
+          tags: product.tags.slice(0, 3),
+        },
+        quickReplies: ['帮我看看详情', '加入购物车', '跳过'],
+      },
+    }
   }
 
-  // ====== Product Scoring Engine ======
+  // ===== Scoring Engine =====
 
-  // Public for testability — scores product against user preferences (0-100)
   scoreProduct(
     product: Product,
     preferences: UserPreferences
-  ): { shouldNotify: boolean; matchScore: number; reasoning: string; recommendation?: ChatResponse } {
+  ): { matchScore: number; reasoning: string } {
     let score = 50
     const reasons: string[] = []
 
-    // Budget match
+    // Budget match (0–15)
     if (preferences.budgetRange) {
       const [min, max] = preferences.budgetRange
       if (product.price >= min && product.price <= max) {
@@ -120,7 +104,7 @@ export class MonitorAgent implements ShoppingAgent {
       }
     }
 
-    // Category preference
+    // Category preference (0–20)
     if (preferences.preferredCategories?.length) {
       const categoryMap: Record<string, string[]> = {
         '服装': ['clothing'],
@@ -136,10 +120,10 @@ export class MonitorAgent implements ShoppingAgent {
       }
     }
 
-    // Skin tone match
+    // Skin tone match (0–10)
     if (preferences.skinTone && (product.category === 'clothing' || product.category === 'skincare')) {
-      reasons.push('很适合您的肤色')
       score += 10
+      reasons.push('很适合您的肤色')
     }
 
     // Quality signals
@@ -156,34 +140,13 @@ export class MonitorAgent implements ShoppingAgent {
       reasons.push(`打${Math.round((product.price / product.originalPrice) * 10)}折`)
     }
 
-    const shouldNotify = score >= 65
-    const recommendation: ChatResponse | undefined = shouldNotify
-      ? {
-          text: `👀 亲！刚上了一个很适合您的商品——"${product.name}"，${reasons.slice(0, 2).join('，')}。`,
-          intent: 'recommend_product',
-          productCard: {
-            productId: product.id,
-            name: product.name,
-            price: product.price,
-            imageUrl: product.imageUrl,
-            highlightReason: reasons.join('；'),
-            tags: product.tags.slice(0, 3),
-          },
-          quickReplies: ['帮我看看详情', '加入购物车', '跳过'],
-        }
-      : undefined
-
     return {
-      shouldNotify,
       matchScore: score,
       reasoning: reasons.join('；'),
-      recommendation,
     }
   }
 
-  getState(): AgentState {
-    return this.state
-  }
+  // ===== State =====
 
   getObservationCount(): number {
     return this.observationCount
@@ -198,9 +161,9 @@ export class MonitorAgent implements ShoppingAgent {
   }
 
   reset(): void {
-    this.state = 'idle'
     this.observationCount = 0
     this.lastObservedProductId = null
+    this.pushedProductIds.clear()
     this.enabled = true
   }
 }

@@ -1,13 +1,13 @@
-import { useCallback, useRef, useEffect } from 'react'
+import { useCallback, useRef } from 'react'
 import { useConversationStore } from '../store/useConversationStore'
 import { useLiveStreamStore } from '../store/useLiveStreamStore'
 import { useUserStore } from '../store/useUserStore'
 import { useCartStore } from '../store/useCartStore'
 import { useSpeechSynthesis } from './useSpeechSynthesis'
-import { agentBus } from '../agents/AgentBus'
+import { shoppingAgent } from '../agents/ShoppingAgent'
 import { monitorAgent } from '../agents/MonitorAgent'
+import { activityClock } from '../agents/activityClock'
 import type { Product } from '../types'
-import type { AgentMessage } from '../agents/types'
 
 export function useAIShoppingGuide() {
   const {
@@ -24,98 +24,71 @@ export function useAIShoppingGuide() {
 
   const currentProduct = useLiveStreamStore((s) => s.currentProduct)
   const addHostQuestion = useLiveStreamStore((s) => s.addHostQuestion)
-  const userPreferences = useUserStore((s) => s.preferences)
   const conversationId = useConversationStore((s) => s.conversationId)
   const addItem = useCartStore((s) => s.addItem)
+  const userPreferences = useUserStore((s) => s.preferences)
   const { speak, stop } = useSpeechSynthesis()
   const processingRef = useRef(false)
 
-  // Refs for store actions — keeps UI handler closure fresh
-  const currentProductRef = useRef(currentProduct)
-  currentProductRef.current = currentProduct
-  const addItemRef = useRef(addItem)
-  addItemRef.current = addItem
-  const addHostQuestionRef = useRef(addHostQuestion)
-  addHostQuestionRef.current = addHostQuestion
-  const addAIMessageRef = useRef(addAIMessage)
-  addAIMessageRef.current = addAIMessage
-  const addAgentObservationRef = useRef(addAgentObservation)
-  addAgentObservationRef.current = addAgentObservation
-  const setThinkingRef = useRef(setThinking)
-  setThinkingRef.current = setThinking
-  const setSpeakingRef = useRef(setSpeaking)
-  setSpeakingRef.current = setSpeaking
-  const speakRef = useRef(speak)
-  speakRef.current = speak
-
-  // Wire up AgentBus → UI: process agent_response messages
-  useEffect(() => {
-    agentBus.onUI((msg: AgentMessage) => {
-      if (msg.type === 'agent_response') {
-        const { response, userText, shouldNotify } = msg.payload
-        if (!response) return
-
-        setThinkingRef.current(false)
-        setSpeakingRef.current(false)
-
-        if (shouldNotify) {
-          addAgentObservationRef.current(response.text, response.productCard)
-        } else {
-          addAIMessageRef.current(response.text, response.productCard, response.quickReplies)
-        }
-
-        if (response.action?.type === 'add_to_cart' && currentProductRef.current) {
-          addItemRef.current(currentProductRef.current)
-        }
-
-        if (response.needHostHelp && userText) {
-          addHostQuestionRef.current(userText)
-        }
-
-        setSpeakingRef.current(true)
-        speakRef.current(response.text, () => {
-          setSpeakingRef.current(false)
-        })
-      }
-
-      if (msg.type === 'status_update') {
-        const { reasoning } = msg.payload
-        if (reasoning?.includes('意图分析')) {
-          setAgentMode('analyzing')
-        }
-      }
-    })
-  }, [setAgentMode])
-
-  const handleUserVoice = useCallback(
-    async (transcript: string) => {
+  const doHandleUserInput = useCallback(
+    async (transcript: string, inputType: 'voice' | 'text') => {
       if (processingRef.current) return
       processingRef.current = true
 
       stop()
       setSpeaking(false)
       setError(null)
-      addUserMessage(transcript, 'voice')
+      addUserMessage(transcript, inputType)
       setThinking(true)
       setAgentMode('analyzing')
 
       try {
-        await agentBus.dispatch({
-          from: 'ui',
-          to: 'orchestrator',
-          type: 'user_input',
-          payload: {
-            userText: transcript,
-            currentProduct,
-            userPreferences,
-            messages: messages.map((m) => ({
-              role: m.role as 'user' | 'assistant',
-              content: m.content,
-              timestamp: m.timestamp,
-            })),
-            conversationId,
-          },
-          priority: 'normal',
+        const recentMessages = messages.slice(-6).map((m) => ({
+          role: m.role as 'user' | 'assistant',
+          content: m.content,
+          timestamp: m.timestamp,
+        }))
+
+        // Try LLM first, fallback to regex on any error
+        let output = await shoppingAgent.processLLM({
+          userText: transcript,
+          currentProduct,
+          userPreferences,
+          recentMessages,
+        })
+
+        setThinking(false)
+        setAgentMode('idle')
+
+        // Consume response
+        addAIMessage(output.text, output.productCard, output.quickReplies)
+
+        // Execute action
+        if (output.action) {
+          switch (output.action.type) {
+            case 'add_to_cart': {
+              const product = currentProduct
+              if (product) addItem(product)
+              break
+            }
+            case 'escalate_to_host':
+              addHostQuestion(output.action.question)
+              break
+            case 'toggle_monitor':
+              monitorAgent.setEnabled(output.action.enable)
+              break
+          }
+        }
+
+        if (output.needHostHelp) {
+          addHostQuestion(transcript)
+        }
+
+        // Speak response — touch clock on end so cooldown starts after TTS finishes
+        setSpeaking(true)
+        speak(output.text, () => {
+          setSpeaking(false)
+          activityClock.touch()
         })
       } catch {
         setThinking(false)
@@ -131,67 +104,32 @@ export function useAIShoppingGuide() {
       userPreferences,
       conversationId,
       addUserMessage,
+      addAIMessage,
+      addItem,
+      addHostQuestion,
       setThinking,
       setSpeaking,
       setError,
       setAgentMode,
+      speak,
       stop,
     ]
+  )
+
+  const handleUserVoice = useCallback(
+    (transcript: string) => doHandleUserInput(transcript, 'voice'),
+    [doHandleUserInput]
   )
 
   const handleUserText = useCallback(
-    async (text: string) => {
-      if (processingRef.current || !text.trim()) return
-      processingRef.current = true
-
-      stop()
-      setSpeaking(false)
-      setError(null)
-      addUserMessage(text, 'text')
-      setThinking(true)
-      setAgentMode('analyzing')
-
-      try {
-        await agentBus.dispatch({
-          from: 'ui',
-          to: 'orchestrator',
-          type: 'user_input',
-          payload: {
-            userText: text,
-            currentProduct,
-            userPreferences,
-            messages: messages.map((m) => ({
-              role: m.role as 'user' | 'assistant',
-              content: m.content,
-              timestamp: m.timestamp,
-            })),
-            conversationId,
-          },
-          priority: 'normal',
-        })
-      } catch {
-        setThinking(false)
-        setAgentMode('idle')
-        setError('网络连接失败，请重试')
-      } finally {
-        processingRef.current = false
-      }
+    (text: string) => {
+      if (!text.trim()) return
+      doHandleUserInput(text, 'text')
     },
-    [
-      messages,
-      currentProduct,
-      userPreferences,
-      conversationId,
-      addUserMessage,
-      setThinking,
-      setSpeaking,
-      setError,
-      setAgentMode,
-      stop,
-    ]
+    [doHandleUserInput]
   )
 
-  // Agent: Auto-observation via MonitorAgent
+  // Auto-observation via MonitorAgent — called on product switch
   const runAgentObservation = useCallback(
     (product: Product) => {
       if (!autoObserve) return
@@ -202,16 +140,19 @@ export function useAIShoppingGuide() {
 
       const result = monitorAgent.observeProduct(product, userPreferences, -1)
 
-      if (result.shouldNotify) {
+      if (result.shouldPush && result.recommendation) {
         setAgentMode('recommending')
-        setTimeout(() => {
-          setAgentMode('idle')
-        }, 2000)
+        addAgentObservation(result.recommendation.text, result.recommendation.productCard)
+        setSpeaking(true)
+        speak(result.recommendation.text, () => {
+          setSpeaking(false)
+        })
+        setTimeout(() => setAgentMode('idle'), 2000)
       } else {
         setAgentMode('observing')
       }
     },
-    [autoObserve, userPreferences, setAgentMode]
+    [autoObserve, userPreferences, setAgentMode, addAgentObservation, speak, setSpeaking]
   )
 
   return {

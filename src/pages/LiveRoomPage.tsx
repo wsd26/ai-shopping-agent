@@ -16,9 +16,11 @@ import { useLiveStreamStore } from '../store/useLiveStreamStore'
 import { useConversationStore } from '../store/useConversationStore'
 import { useUserStore } from '../store/useUserStore'
 import { monitorAgent } from '../agents/MonitorAgent'
+import { activityClock } from '../agents/activityClock'
+import { speakText } from '../utils/ttsConfig'
 import type { Product } from '../types'
 
-const AUTO_ROTATE_INTERVAL = 10000
+const AUTO_ROTATE_INTERVAL = 15000
 
 export default function LiveRoomPage() {
   const currentProduct = useLiveStreamStore((s) => s.currentProduct)
@@ -30,7 +32,6 @@ export default function LiveRoomPage() {
   const userPreferences = useUserStore((s) => s.preferences)
   const setAgentMode = useConversationStore((s) => s.setAgentMode)
   const setSpeaking = useConversationStore((s) => s.setSpeaking)
-  const lastUserInteractionTime = useConversationStore((s) => s.lastUserInteractionTime)
   const prevProductIdRef = useRef<string | null>(null)
   const greetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -76,9 +77,8 @@ export default function LiveRoomPage() {
     if (!userPreferences || Object.keys(userPreferences).length === 0) return
     if (productIndex === 0) return
 
-    const cooldownMs = 15000
-    const timeSinceInteraction = Date.now() - lastUserInteractionTime
-    if (timeSinceInteraction < cooldownMs) {
+    // Check activity cooldown via activityClock (replaces AgentBus conflict detection)
+    if (activityClock.isUserActive()) {
       setAgentMode('observing')
       return
     }
@@ -87,8 +87,17 @@ export default function LiveRoomPage() {
 
     const result = monitorAgent.observeProduct(currentProduct, userPreferences, productIndex)
 
-    if (result.shouldNotify) {
+    if (result.shouldPush && result.recommendation) {
       setAgentMode('recommending')
+      // Add observation to conversation and speak
+      useConversationStore.getState().addAgentObservation(
+        result.recommendation.text,
+        result.recommendation.productCard
+      )
+      if ('speechSynthesis' in window) {
+        setSpeaking(true)
+        speakText(result.recommendation.text, () => setSpeaking(false))
+      }
       const timer = setTimeout(() => {
         setAgentMode('idle')
         useConversationStore.getState().setPanelState('half')
@@ -97,7 +106,7 @@ export default function LiveRoomPage() {
     } else {
       setAgentMode('observing')
     }
-  }, [currentProduct?.id, lastUserInteractionTime])
+  }, [currentProduct?.id])
 
   // Agent proactive prompts: after 60s idle, nudge user
   useEffect(() => {
@@ -106,11 +115,11 @@ export default function LiveRoomPage() {
     if (messages.length === 0) return
 
     const timer = setInterval(() => {
-      const timeSince = Date.now() - useConversationStore.getState().lastUserInteractionTime
-      if (timeSince >= idleMs) {
+      const idleTime = activityClock.idleTime()
+      if (idleTime >= idleMs) {
         const prompts = [
           { text: '亲，还在看吗？需要小快帮你找什么吗？', replies: ['现在有什么商品？', '帮我推荐好物', '不用了'] },
-          { text: '🤖 小快一直在帮你盯着呢～有需要随时喊我！', replies: ['推荐个适合我的', '购物车里有什么？'] },
+          { text: '小快一直在帮你盯着呢～有需要随时喊我！', replies: ['推荐个适合我的', '购物车里有什么？'] },
           { text: '直播间还在直播中哦，想了解哪个商品直接问我～', replies: ['看看当前商品', '有没有优惠的？'] },
         ]
         const prompt = prompts[Math.floor(Math.random() * prompts.length)]
@@ -131,8 +140,8 @@ export default function LiveRoomPage() {
 
     greetTimerRef.current = setTimeout(() => {
       const greetingText = currentProduct
-        ? `你好亲！我是你的AI购物Agent小快 🤖 我会主动帮你监控直播间，找到最适合你的商品。当前展示的是"${currentProduct.name}"，有问题随时语音问我！`
-        : '你好亲！我是你的AI购物Agent小快 🤖 我会主动帮你监控直播间，自动分析每个商品是否适合你。开启自动监控后，有好物我会立刻通知你～'
+        ? `你好亲！我是你的AI导购小快。我会主动帮你监控直播间，找到最适合你的商品。当前展示的是"${currentProduct.name}"，有问题随时语音问我！`
+        : '你好亲！我是你的AI导购小快。我会主动帮你监控直播间，自动分析每个商品是否适合你。开启自动监控后，有好物我会立刻通知你～'
 
       useConversationStore.getState().addAIMessage(
         greetingText,
@@ -142,14 +151,7 @@ export default function LiveRoomPage() {
 
       if ('speechSynthesis' in window) {
         setSpeaking(true)
-        const utterance = new SpeechSynthesisUtterance(greetingText)
-        utterance.lang = 'zh-CN'
-        utterance.rate = 1.1
-        const voices = window.speechSynthesis.getVoices()
-        const zhVoice = voices.find((v) => v.lang.startsWith('zh-CN'))
-        if (zhVoice) utterance.voice = zhVoice
-        utterance.onend = () => setSpeaking(false)
-        window.speechSynthesis.speak(utterance)
+        speakText(greetingText, () => setSpeaking(false))
       }
     }, 1000)
 
